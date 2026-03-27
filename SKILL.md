@@ -12,20 +12,11 @@ argument-hint: --store <path-to-lab-notebook> <task description>
 
 # /lisa-loop — Stateful Loop
 
-Where Ralph loop is *autotrophic* — feeding on its own output (files, git
-history) to persist blindly — Lisa loop is *heterotrophic*: each iteration
-reads external state, studies it, then acts thoughtfully.
-
-Build and launch a ralph-loop where each iteration queries a lab-notebook
-store for accumulated state, does work, and logs results. The prompt text
-is static, but the notebook data changes each iteration — making the loop
-behave dynamically.
-
-**How it works**: Ralph-loop feeds the same prompt every iteration. The
-agent has no cross-iteration memory except files on disk. This skill
-generates a prompt that uses `lab-notebook` as persistent, queryable
-state — so each iteration's RECALL phase returns different data, driving
-different behavior.
+Lisa-loop is a prompt generator for ralph-loop. It builds a structured
+prompt that gives each iteration access to a `lab-notebook` store —
+adding queryable, persistent state on top of ralph-loop's existing
+file and git-based state. The prompt is static, but the notebook data
+changes each iteration, making the loop behave dynamically.
 
 ## Step 1: Parse Arguments
 
