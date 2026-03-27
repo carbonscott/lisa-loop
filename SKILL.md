@@ -65,22 +65,31 @@ The completion promise is always `"DONE"` — it's a mechanical signal. The sema
 
 ## Step 3: Optional — Workflow Shape
 
-Present all three capabilities in one compact question:
+Ask these sub-questions in order. Each is independently skippable. If the user skips all three, omit all optional sections from the generated prompt — the output is identical to a simple lisa-loop.
 
-> **Optional** (skip any that don't apply):
-> - **Phases**: Does this task have distinct stages? List them in order.
-> - **Categories**: Should iterations be classified? Name the categories.
-> - **Pacing**: Should the loop sleep between iterations? Define tiers per category.
->
-> Describe what you want, or "skip" to use a simple uniform loop.
+### Step 3a — Phases
 
-If the user skips, omit all optional sections from the generated prompt — the output is identical to a simple lisa-loop.
+> Does this task have distinct stages? List them in order, or skip.
 
-**If phases provided**: The user lists ordered stages (e.g., "Launch → Monitor → Eval → Summary"). Each phase has implicit entry/exit criteria derived from the task. These go into a `## Phases` section in the generated prompt.
+If provided, the user lists ordered stages (e.g., "Launch → Monitor → Eval → Summary"). Each phase has implicit entry/exit criteria derived from the task. These go into a `## Phases` section in the generated prompt.
 
-**If categories provided**: The user names iteration types (e.g., "heartbeat, progress, anomaly, completion"). Each iteration's LOG entry will include `--extra category=<chosen>`. The ASSESS phase checks category distribution.
+### Step 3b — Categories
 
-**If pacing provided**: The user defines sleep tiers per category (e.g., "heartbeat: 60s, progress: 0s, anomaly: 0s"). Consecutive same-category entries multiply the sleep geometrically (2x per repeat, capped at a user-specified max or 1800s). Pacing requires categories — if the user wants pacing but skipped categories, ask for categories first.
+> Should iterations be classified? Name the categories, or skip.
+
+If provided, the user names iteration types (e.g., "heartbeat, progress, anomaly, completion"). Each iteration's LOG entry will include `--extra category=<chosen>`. The ASSESS phase checks category distribution.
+
+### Step 3c — Pacing (only if categories were provided in 3b)
+
+> How should the loop pace itself during quiet periods?
+> Default: `30s, 30s, 60s, 60s, then double each time (cap 1800s)`
+> Customize, or "default"?
+
+The user can provide their own sequence (e.g., `10s, 10s, 30s, then double, cap 600s`) or accept the default. Then ask:
+
+> Which category means "nothing interesting happened"? (This triggers backoff escalation.)
+
+Infer if obvious from context (e.g., "heartbeat" in a monitoring task). This is the **low-activity category** — consecutive entries of this category escalate the sleep duration through the backoff sequence.
 
 ## Step 4: Choose Context Name
 
@@ -134,10 +143,19 @@ final phase.
 <natural language from step 2 — when this is true, output <promise>DONE</promise>>
 
 ## Pacing *(if configured)*
-<table: category → base sleep duration, from step 3>
-Cap: <user-specified max or 1800s>
-Consecutive same-category entries multiply the base sleep geometrically
-(2x per repeat, up to the cap).
+
+Backoff sequence: <user-supplied or default: 30s, 30s, 60s, 60s, then double, cap 1800s>
+Low-activity category: <from step 3c, e.g., "heartbeat">
+
+Algorithm:
+1. In RECALL, count consecutive entries of the low-activity category
+   from the most recent entries.
+2. Walk the backoff sequence by that count (0 consecutive → first value,
+   1 consecutive → second value, etc.).
+3. After the explicit sequence steps, double the last value each time,
+   up to the cap.
+4. Any non-low-activity entry resets the count to 0.
+5. Sleep at the end of CHECK (after logging), before the next iteration.
 
 ## Each Iteration
 
@@ -150,6 +168,8 @@ Consecutive same-category entries multiply the base sleep geometrically
    ```
    LAB_NOTEBOOK_DIR="<path>" lab-notebook sql "SELECT ts, type, substr(content,1,120) FROM entries WHERE context='<context>' ORDER BY ts DESC LIMIT 10"
    ```
+   *(if pacing)* Count consecutive entries of the low-activity category
+   from the top of the results to determine the current backoff position.
 
 2. ASSESS — Based on recalled state: what has been done, what remains,
    what should this iteration focus on? Also check git log and modified
@@ -175,8 +195,10 @@ Consecutive same-category entries multiply the base sleep geometrically
 5. CHECK — Evaluate the stop condition. If met, output <promise>DONE</promise>.
    Otherwise, summarize remaining work (the next iteration will see this
    in the notebook via step 1).
-   *(if pacing)* Sleep for the duration matching this iteration's category
-   (see Pacing section above).
+   *(if pacing)* Compute sleep duration: walk the backoff sequence by
+   the consecutive low-activity count from RECALL. If past the end of
+   the explicit sequence, double the last value (capped). Execute:
+   `sleep <computed-seconds>`
 ```
 
 ---
