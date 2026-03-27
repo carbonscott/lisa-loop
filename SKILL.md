@@ -1,0 +1,219 @@
+---
+name: lisa-loop
+description: >-
+  Start a stateful loop with an explicitly specified lab-notebook store
+  for cross-iteration memory. This is the portable version — you provide
+  the store path via --store. Project-level wrappers can auto-detect the
+  store and delegate here. Trigger on: stateful loop, lisa-loop, lisa
+  loop, iterative task with memory, recall-and-log loop.
+user-invocable: true
+argument-hint: --store <path-to-lab-notebook> <task description>
+---
+
+# /lisa-loop — Stateful Loop
+
+Where Ralph loop is *autotrophic* — feeding on its own output (files, git
+history) to persist blindly — Lisa loop is *heterotrophic*: each iteration
+reads external state, studies it, then acts thoughtfully.
+
+Build and launch a ralph-loop where each iteration queries a lab-notebook
+store for accumulated state, does work, and logs results. The prompt text
+is static, but the notebook data changes each iteration — making the loop
+behave dynamically.
+
+**How it works**: Ralph-loop feeds the same prompt every iteration. The
+agent has no cross-iteration memory except files on disk. This skill
+generates a prompt that uses `lab-notebook` as persistent, queryable
+state — so each iteration's RECALL phase returns different data, driving
+different behavior.
+
+## Step 1: Parse Arguments
+
+From `$ARGUMENTS`, extract:
+- `--store <path>` — **required**. Path to a lab-notebook store.
+- Everything else — the task description.
+
+Edge cases:
+- `--store` is missing entirely → ask: "Which lab-notebook store should this loop use? Provide the path."
+- `--store` is present but no path follows it → ask: "You specified --store but no path. Which store?"
+- Path is relative → resolve to absolute using the current working directory before proceeding. All paths in the generated prompt must be absolute.
+
+If the task description is empty or too vague to act on, ask: "What should the loop iterate on?"
+
+**Probe the store**: Run:
+```bash
+LAB_NOTEBOOK_DIR="<path>" lab-notebook schema
+```
+- If it **errors** → the store isn't initialized. Tell the user:
+  "That store isn't initialized. Run `LAB_NOTEBOOK_DIR=<path> lab-notebook init` first."
+- If it **succeeds** → parse the output for:
+  - **Entry types** from the `type` line (e.g., `one of: experiment, baseline, distillation`)
+  - **Schema fields** and their SQL types (lines marked `-- schema field`)
+
+Pick the most appropriate entry type for the LOG phase based on the task and the available types. If unsure, ask briefly.
+
+## Step 2: Define the Stop Condition
+
+Ask: "What does 'done' look like?"
+
+The answer becomes natural language embedded in the prompt. Examples:
+- "All 5 loss functions have been tested and results logged"
+- "Validation loss has stopped improving for 2 consecutive iterations"
+- "The bug is fixed and tests pass"
+
+The completion promise is always `"DONE"` — it's a mechanical signal. The semantics live in this description.
+
+## Step 3: Optional — Workflow Shape
+
+Present all three capabilities in one compact question:
+
+> **Optional** (skip any that don't apply):
+> - **Phases**: Does this task have distinct stages? List them in order.
+> - **Categories**: Should iterations be classified? Name the categories.
+> - **Pacing**: Should the loop sleep between iterations? Define tiers per category.
+>
+> Describe what you want, or "skip" to use a simple uniform loop.
+
+If the user skips, omit all optional sections from the generated prompt — the output is identical to a simple lisa-loop.
+
+**If phases provided**: The user lists ordered stages (e.g., "Launch → Monitor → Eval → Summary"). Each phase has implicit entry/exit criteria derived from the task. These go into a `## Phases` section in the generated prompt.
+
+**If categories provided**: The user names iteration types (e.g., "heartbeat, progress, anomaly, completion"). Each iteration's LOG entry will include `--extra category=<chosen>`. The ASSESS phase checks category distribution.
+
+**If pacing provided**: The user defines sleep tiers per category (e.g., "heartbeat: 60s, progress: 0s, anomaly: 0s"). Consecutive same-category entries multiply the sleep geometrically (2x per repeat, capped at a user-specified max or 1800s). Pacing requires categories — if the user wants pacing but skipped categories, ask for categories first.
+
+## Step 4: Choose Context Name
+
+Auto-suggest a context slug derived from the task description (e.g., "run 5 training experiments" → `training-experiments`). Present it:
+
+> **Context**: `training-experiments` — OK, or different name?
+
+The context name scopes all entries from this loop. It's the key for future queries, so it should be intentional and descriptive.
+
+## Step 5: Set Safety Cap
+
+Default to `--max-iterations 10`. Mention it:
+
+> **Max iterations**: 10 (safety cap). Adjust?
+
+## Step 6: Assemble, Confirm, Launch
+
+Build the prompt using the template below, filling in all placeholders from steps 1-5. Sections marked *(if configured)* are only included when the user provided values in step 3. If skipped, omit them entirely — the output should be identical to a simple lisa-loop. Present the full assembled prompt to the user for review:
+
+> Here's the assembled lisa-loop prompt:
+>
+> *(show the filled-in prompt)*
+>
+> Ready to launch, or adjust?
+
+**After the user confirms, immediately invoke `/ralph-loop:ralph-loop` with the assembled prompt, `--max-iterations N`, and `--completion-promise "DONE"`. No preamble, no summary, no "launching now" text. Just call the Skill tool.**
+
+---
+
+## Prompt Template
+
+Fill placeholders from steps 1-5. The 5 iteration phases are guidance, not rigid script — the agent adapts based on what it finds. Sections marked *(if configured)* are only included when the user provided values in step 3; omit them entirely otherwise.
+
+```
+## State Store
+Notebook: <absolute-path-from-store-argument>
+Context: <context-slug>
+Available entry types: <comma-separated list from lab-notebook schema output>
+Available fields: <comma-separated list from lab-notebook schema output, with types>
+
+## Goal
+<task description>
+
+## Phases *(if configured)*
+<numbered list of phases from step 3>
+Determine current phase by querying notebook entries. Transition to the next
+phase when its exit criteria are met. The stop condition applies after the
+final phase.
+
+## Stop Condition
+<natural language from step 2 — when this is true, output <promise>DONE</promise>>
+
+## Pacing *(if configured)*
+<table: category → base sleep duration, from step 3>
+Cap: <user-specified max or 1800s>
+Consecutive same-category entries multiply the base sleep geometrically
+(2x per repeat, up to the cap).
+
+## Each Iteration
+
+1. RECALL — Query the notebook for prior entries in this context:
+   ```
+   LAB_NOTEBOOK_DIR="<path>" lab-notebook search "<context>" --context <context>
+   ```
+   If no entries exist, this is iteration 1 — start fresh.
+   For structured queries (counts, comparisons):
+   ```
+   LAB_NOTEBOOK_DIR="<path>" lab-notebook sql "SELECT ts, type, substr(content,1,120) FROM entries WHERE context='<context>' ORDER BY ts DESC LIMIT 10"
+   ```
+
+2. ASSESS — Based on recalled state: what has been done, what remains,
+   what should this iteration focus on? Also check git log and modified
+   files on disk for additional context from prior iterations.
+   *(if categories)* Check recent entry categories to understand loop trajectory.
+   *(if phases)* Determine which phase we're in based on logged entries.
+
+3. EXECUTE — Do the work for this iteration.
+
+4. LOG — Record what you did and learned:
+   ```
+   LAB_NOTEBOOK_DIR="<path>" lab-notebook emit \
+     --context <context> --type <entry-type> \
+     [--extra field=value ...] \
+     "concise summary of what happened this iteration"
+   ```
+   Populate available fields (e.g. --extra status=keep --extra metrics='{"val_loss":0.5}')
+   where relevant. If the logging command fails, note the error and continue —
+   don't let logging failures block the main work.
+   *(if categories)* Classify this iteration as one of: <categories>.
+   Include `--extra category=<chosen>` in the emit command.
+
+5. CHECK — Evaluate the stop condition. If met, output <promise>DONE</promise>.
+   Otherwise, summarize remaining work (the next iteration will see this
+   in the notebook via step 1).
+   *(if pacing)* Sleep for the duration matching this iteration's category
+   (see Pacing section above).
+```
+
+---
+
+## Stateful Mechanisms
+
+The generated prompt leverages all available cross-iteration state:
+
+| Mechanism | How | Role |
+|-----------|-----|------|
+| **Notebook/logbook entries** | `lab-notebook search/sql` | Primary — structured, queryable, persists beyond the loop |
+| **Files on disk** | Read modified files | Secondary — see your own prior work |
+| **Git history** | `git log`, `git diff` | Secondary — what changed between iterations |
+| **Iteration counter** | Shown in ralph-loop system message | Secondary — know which iteration you're on |
+| **Test/build results** | Run tests, check output | Secondary — backpressure from verification |
+
+---
+
+## Template Reference (Hand-Crafting)
+
+To build a lisa-loop prompt manually instead of using interactive setup:
+
+1. Pick your state store (any lab-notebook path)
+2. Pick a context name (all entries share this key)
+3. Write a prompt following the 5-phase pattern above
+4. Invoke directly:
+   ```
+   /ralph-loop:ralph-loop "<your prompt>" --max-iterations 10 --completion-promise "DONE"
+   ```
+
+**Key principles for hand-crafted prompts:**
+- Always include a RECALL phase at the top — this is what makes the loop stateful
+- Always include a LOG phase — this is what feeds the next iteration's RECALL
+- Handle iteration 1 explicitly ("if no entries, start fresh")
+- Include command templates for `lab-notebook` — the agent needs the CLI syntax
+- Make the stop condition concrete and evaluable, not vague
+- Add `--max-iterations` as a safety cap even if you have a completion promise
+- The agent must output `<promise>DONE</promise>` (with XML tags), not bare `DONE`. The `--completion-promise "DONE"` flag tells ralph-loop what text to look for; the `<promise>` wrapper is required by ralph-loop's stop hook
+
+$ARGUMENTS
