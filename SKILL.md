@@ -1,11 +1,11 @@
 ---
 name: lisa-loop
 description: >-
-  Start a stateful loop with an explicitly specified lab-notebook store
-  for cross-iteration memory. This is the portable version — you provide
-  the store path via --store. Project-level wrappers can auto-detect the
-  store and delegate here. Trigger on: stateful loop, lisa-loop, lisa
-  loop, iterative task with memory.
+  Prompt generator for ralph-loop that adds lab-notebook as
+  cross-iteration state. Each iteration can recall prior results,
+  do work, and log progress. Use when you need a stateful iterative
+  loop with structured memory. Trigger on: stateful loop, lisa-loop,
+  iterative task with memory.
 user-invocable: true
 argument-hint: --store <path-to-lab-notebook> <task description>
 ---
@@ -56,7 +56,7 @@ The completion promise is always `"DONE"` — it's a mechanical signal. The sema
 
 ## Step 3: Optional — Workflow Shape
 
-Ask these sub-questions in order. Each is independently skippable. If the user skips all three, omit all optional sections from the generated prompt — the output is identical to a simple lisa-loop.
+Ask these sub-questions in order. Each is independently skippable. If the user skips all three, omit all optional sections from the generated prompt — the generated prompt has no optional sections.
 
 ### Step 3a — Phases
 
@@ -100,7 +100,7 @@ Default to `--max-iterations 10`. Mention it:
 
 ## Step 6: Assemble, Confirm, Launch
 
-Build the prompt using the template below, filling in all placeholders from steps 1-5. Sections marked *(if configured)* are only included when the user provided values in step 3. If skipped, omit them entirely — the output should be identical to a simple lisa-loop. Present the full assembled prompt to the user for review:
+Build the prompt using the template below, filling in all placeholders from steps 1-5. Sections marked *(if configured)* are only included when the user provided values in step 3. If skipped, omit them entirely — the prompt should have no optional sections. Present the full assembled prompt to the user for review:
 
 > Here's the assembled lisa-loop prompt:
 >
@@ -202,7 +202,7 @@ count 0→30s, 1→30s, 2→60s, 3→60s, 4→120s, 5→240s, 6→480s, 7→960s
 
 ## Stateful Mechanisms
 
-The generated prompt leverages all available cross-iteration state:
+The generated prompt leverages all available cross-iteration state. The last four are provided by ralph-loop; lisa-loop adds the first.
 
 | Mechanism | How | Role |
 |-----------|-----|------|
