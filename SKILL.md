@@ -5,7 +5,7 @@ description: >-
   for cross-iteration memory. This is the portable version — you provide
   the store path via --store. Project-level wrappers can auto-detect the
   store and delegate here. Trigger on: stateful loop, lisa-loop, lisa
-  loop, iterative task with memory, recall-and-log loop.
+  loop, iterative task with memory.
 user-invocable: true
 argument-hint: --store <path-to-lab-notebook> <task description>
 ---
@@ -77,7 +77,7 @@ If provided, the user lists ordered stages (e.g., "Launch → Monitor → Eval �
 
 > Should iterations be classified? Name the categories, or skip.
 
-If provided, the user names iteration types (e.g., "heartbeat, progress, anomaly, completion"). Each iteration's LOG entry will include `--extra category=<chosen>`. The ASSESS phase checks category distribution.
+If provided, the user names iteration types (e.g., "heartbeat, progress, anomaly, completion"). If the store schema has a suitable field (e.g., `change_type`), use it as a schema flag in LOG. Otherwise, use `--extra category=<chosen>` and query via `json_extract(extra,'$.category')` in RECALL SQL. The ASSESS phase checks category distribution.
 
 ### Step 3c — Pacing (only if categories were provided in 3b)
 
@@ -90,6 +90,8 @@ The user can provide their own sequence (e.g., `10s, 10s, 30s, then double, cap 
 > Which category means "nothing interesting happened"? (This triggers backoff escalation.)
 
 Infer if obvious from context (e.g., "heartbeat" in a monitoring task). This is the **low-activity category** — consecutive entries of this category escalate the sleep duration through the backoff sequence.
+
+If no category naturally maps to "nothing happened," skip pacing entirely.
 
 ## Step 4: Choose Context Name
 
@@ -152,10 +154,13 @@ Algorithm:
    from the most recent entries.
 2. Walk the backoff sequence by that count (0 consecutive → first value,
    1 consecutive → second value, etc.).
-3. After the explicit sequence steps, double the last value each time,
-   up to the cap.
+3. After the explicit sequence is exhausted, each additional consecutive
+   low-activity entry doubles the previous sleep duration, up to the cap.
 4. Any non-low-activity entry resets the count to 0.
 5. Sleep at the end of CHECK (after logging), before the next iteration.
+
+Example for sequence `30, 30, 60, 60, cap 1800`:
+count 0→30s, 1→30s, 2→60s, 3→60s, 4→120s, 5→240s, 6→480s, 7→960s, 8+→1800s
 
 ## Each Iteration
 
@@ -166,14 +171,13 @@ Algorithm:
    If no entries exist, this is iteration 1 — start fresh.
    For structured queries (counts, comparisons):
    ```
-   LAB_NOTEBOOK_DIR="<path>" lab-notebook sql "SELECT ts, type, substr(content,1,120) FROM entries WHERE context='<context>' ORDER BY ts DESC LIMIT 10"
+   LAB_NOTEBOOK_DIR="<path>" lab-notebook sql "SELECT ts, type, <schema-fields>, substr(content,1,120) FROM entries WHERE context='<context>' ORDER BY ts DESC LIMIT 10"
    ```
    *(if pacing)* Count consecutive entries of the low-activity category
    from the top of the results to determine the current backoff position.
 
 2. ASSESS — Based on recalled state: what has been done, what remains,
-   what should this iteration focus on? Also check git log and modified
-   files on disk for additional context from prior iterations.
+   what should this iteration focus on?
    *(if categories)* Check recent entry categories to understand loop trajectory.
    *(if phases)* Determine which phase we're in based on logged entries.
 
@@ -183,14 +187,16 @@ Algorithm:
    ```
    LAB_NOTEBOOK_DIR="<path>" lab-notebook emit \
      --context <context> --type <entry-type> \
-     [--extra field=value ...] \
+     [--<schema-field> value ...] [--extra key=value ...] \
      "concise summary of what happened this iteration"
    ```
-   Populate available fields (e.g. --extra status=keep --extra metrics='{"val_loss":0.5}')
-   where relevant. If the logging command fails, note the error and continue —
+   Use schema-defined fields as top-level flags (e.g., `--status keep
+   --change_type progress`). Use `--extra` only for undeclared fields.
+   If the logging command fails, note the error and continue —
    don't let logging failures block the main work.
    *(if categories)* Classify this iteration as one of: <categories>.
-   Include `--extra category=<chosen>` in the emit command.
+   Use the schema field if available (e.g., `--change_type heartbeat`),
+   otherwise `--extra category=<chosen>`.
 
 5. CHECK — Evaluate the stop condition. If met, output <promise>DONE</promise>.
    Otherwise, summarize remaining work (the next iteration will see this
