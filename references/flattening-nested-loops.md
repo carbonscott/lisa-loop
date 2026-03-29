@@ -198,15 +198,18 @@ Solve GitHub issues #101 through #109 sequentially, each through a full
 plan-review-execute-test workflow.
 
 ## Items
-1. Item #101
-2. Item #102
-3. Item #103
-4. Item #104
-5. Item #105
-6. Item #106
-7. Item #107
-8. Item #108
-9. Item #109
+1. Item #101 (GitHub issue)
+2. Item #102 (GitHub issue)
+3. Item #103 (GitHub issue)
+4. Item #104 (GitHub issue)
+5. Item #105 (GitHub issue)
+6. Item #106 (GitHub issue)
+7. Item #107 (GitHub issue)
+8. Item #108 (GitHub issue)
+9. Item #109 (GitHub issue)
+
+Each item is a GitHub issue in this repository. Use /gh-skills to fetch
+details during the PLAN phase.
 
 ## Phases (per item)
 A. PLAN — Fetch the issue with /gh-skills. Read all relevant code. Write a
@@ -239,7 +242,7 @@ All 9 issues have "ALL PHASES COMPLETE" milestone entries → <promise>DONE</pro
    If the most recent milestone is "Item #109: ALL PHASES COMPLETE",
    all work is done — skip to CHECK and emit DONE.
 
-   Check for dead-ends on current item:
+   Check for dead-ends on current item and phase:
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
      lab-notebook search "Item #<current>: <current_phase> FAILED" \
@@ -331,3 +334,6 @@ Each level needs its own **completion signal** in the notebook. The query
 reconstructs all dimensions of the cursor from the most recent entries.
 The prompt's transition logic is the only thing that changes — the
 notebook conventions and query patterns stay the same.
+
+Define a maximum attempt count in the prompt. When retries are exhausted,
+emit a dead-end for the item and advance to the next item.
