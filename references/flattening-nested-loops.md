@@ -94,14 +94,15 @@ LAB_NOTEBOOK_DIR="<STORE>" lab-notebook sql \
 ```
 
 Read the results top-down:
-- If the most recent milestone is `Item #N: ALL PHASES COMPLETE`, the current item is N+1, starting at the first phase.
+- If the most recent milestone is `Item #N: ALL PHASES COMPLETE` and N is the last item, all work is done — skip to CHECK and emit DONE.
+- If the most recent milestone is `Item #N: ALL PHASES COMPLETE` and N is not the last item, the current item is N+1, starting at the first phase.
 - If the most recent milestone is `Item #N: <PHASE> COMPLETE`, the current item is N, and the next phase follows `<PHASE>`.
 - If there are no milestones, this is iteration 1 — start at item 1, phase 1.
 
-### Check for dead-ends on current item
+### Check for dead-ends on current item and phase
 
 ```bash
-LAB_NOTEBOOK_DIR="<STORE>" lab-notebook search "Item #<N>" --context <CTX> --type dead-end
+LAB_NOTEBOOK_DIR="<STORE>" lab-notebook search "Item #<N>: <PHASE> FAILED" --context <CTX> --type dead-end
 ```
 
 ## Transition Logic Template
@@ -128,22 +129,25 @@ D. TEST — run smoke tests, fix failures until all pass
 1. RECALL — Query the notebook to find where you are:
    ```
    LAB_NOTEBOOK_DIR="<STORE>" lab-notebook sql \
-     "SELECT ts, type, substr(content,1,120) FROM entries
-      WHERE context='<CTX>' ORDER BY ts DESC LIMIT 10"
+     "SELECT ts, substr(content,1,120) FROM entries
+      WHERE context='<CTX>' AND type='milestone'
+      ORDER BY ts DESC LIMIT 10"
    ```
    Parse the most recent milestones to determine:
    - current_item: which item number you are working on
    - current_phase: which phase to execute next
    - If no milestones exist → current_item=1, current_phase=A
+   - If the most recent milestone is "Item #N: ALL PHASES COMPLETE" and N
+     is the last item → all work is done, skip to CHECK and emit DONE
 
-   Also check for dead-ends on the current item:
+   Also check for dead-ends on the current item and phase:
    ```
-   LAB_NOTEBOOK_DIR="<STORE>" lab-notebook search "Item #<current_item>" \
+   LAB_NOTEBOOK_DIR="<STORE>" lab-notebook search "Item #<current_item>: <current_phase> FAILED" \
      --context <CTX> --type dead-end
    ```
 
 2. ASSESS — Decide what to do this iteration:
-   - If current phase has a dead-end logged: adjust approach based on what failed
+   - If the dead-end search returned results for the current phase: adjust approach based on what failed
    - Otherwise: proceed with the phase's defined work
 
 3. EXECUTE — Do the work for (current_item, current_phase).
@@ -194,15 +198,15 @@ Solve GitHub issues #101 through #109 sequentially, each through a full
 plan-review-execute-test workflow.
 
 ## Items
-1. Issue #101
-2. Issue #102
-3. Issue #103
-4. Issue #104
-5. Issue #105
-6. Issue #106
-7. Issue #107
-8. Issue #108
-9. Issue #109
+1. Item #101
+2. Item #102
+3. Item #103
+4. Item #104
+5. Item #105
+6. Item #106
+7. Item #107
+8. Item #108
+9. Item #109
 
 ## Phases (per item)
 A. PLAN — Fetch the issue with /gh-skills. Read all relevant code. Write a
@@ -226,16 +230,19 @@ All 9 issues have "ALL PHASES COMPLETE" milestone entries → <promise>DONE</pro
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
      lab-notebook sql \
-     "SELECT ts, type, substr(content,1,120) FROM entries
-      WHERE context='my-repo/fix-9-issues' ORDER BY ts DESC LIMIT 15"
+     "SELECT ts, substr(content,1,120) FROM entries
+      WHERE context='my-repo/fix-9-issues' AND type='milestone'
+      ORDER BY ts DESC LIMIT 15"
    ```
    Determine current_item and current_phase from the most recent milestones.
-   If no milestones → start at Issue #101, phase PLAN.
+   If no milestones → start at Item #101, phase PLAN.
+   If the most recent milestone is "Item #109: ALL PHASES COMPLETE",
+   all work is done — skip to CHECK and emit DONE.
 
    Check for dead-ends on current item:
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
-     lab-notebook search "Issue #<current>" \
+     lab-notebook search "Item #<current>: <current_phase> FAILED" \
      --context my-repo/fix-9-issues --type dead-end
    ```
 
@@ -251,26 +258,27 @@ All 9 issues have "ALL PHASES COMPLETE" milestone entries → <promise>DONE</pro
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
      lab-notebook emit --context my-repo/fix-9-issues --type milestone \
-     "Issue #<N>: <PHASE> COMPLETE — <summary>"
+     "Item #<N>: <PHASE> COMPLETE — <summary>"
    ```
    When all 4 phases pass for an issue:
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
      lab-notebook emit --context my-repo/fix-9-issues --type milestone \
-     "Issue #<N>: ALL PHASES COMPLETE"
+     "Item #<N>: ALL PHASES COMPLETE"
    ```
    On failure:
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
      lab-notebook emit --context my-repo/fix-9-issues --type dead-end \
-     "Issue #<N>: <PHASE> FAILED — <what went wrong>"
+     "Item #<N>: <PHASE> FAILED — <what went wrong>"
    ```
 
 5. CHECK — Count completed issues:
    ```
    LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
      lab-notebook sql \
-     "SELECT COUNT(*) FROM entries
+     "SELECT COUNT(DISTINCT substr(content, 7, instr(substr(content,7),':')-1))
+      FROM entries
       WHERE context='my-repo/fix-9-issues' AND type='milestone'
         AND content LIKE '%ALL PHASES COMPLETE%'"
    ```
@@ -282,28 +290,28 @@ All 9 issues have "ALL PHASES COMPLETE" milestone entries → <promise>DONE</pro
 
 ```
 ts                    type        content
-2026-03-28T21:20:00   decision    Issue #101: plan is to refactor the DataLoader...
-2026-03-28T21:20:30   milestone   Issue #101: PLAN COMPLETE — refactor DataLoader for streaming
-2026-03-28T21:21:00   decision    Issue #101: review found edge case in batch collation, revised
-2026-03-28T21:21:30   milestone   Issue #101: REVIEW COMPLETE — added batch boundary handling
-2026-03-28T21:23:00   milestone   Issue #101: EXECUTE COMPLETE — committed in abc1234
-2026-03-28T21:25:00   milestone   Issue #101: TEST COMPLETE — single-gpu, ddp, fsdp pass
-2026-03-28T21:25:01   milestone   Issue #101: ALL PHASES COMPLETE
-2026-03-28T21:26:00   decision    Issue #102: plan is to add retry logic to API client...
-2026-03-28T21:26:30   milestone   Issue #102: PLAN COMPLETE — exponential backoff in api_client.py
-2026-03-28T21:27:00   milestone   Issue #102: REVIEW COMPLETE — no revisions needed
-2026-03-28T21:28:00   milestone   Issue #102: EXECUTE COMPLETE — committed in def5678
-2026-03-28T21:29:00   dead-end    Issue #102: TEST FAILED — DDP test hangs on barrier sync
-2026-03-28T21:30:00   milestone   Issue #102: TEST COMPLETE — fixed barrier, all pass
-2026-03-28T21:30:01   milestone   Issue #102: ALL PHASES COMPLETE
-2026-03-28T21:31:00   decision    Issue #103: plan is to update schema migration...
-2026-03-28T21:31:30   milestone   Issue #103: PLAN COMPLETE — add nullable column, backfill
+2026-03-28T21:20:00   decision    Item #101: plan is to refactor the DataLoader...
+2026-03-28T21:20:30   milestone   Item #101: PLAN COMPLETE — refactor DataLoader for streaming
+2026-03-28T21:21:00   decision    Item #101: review found edge case in batch collation, revised
+2026-03-28T21:21:30   milestone   Item #101: REVIEW COMPLETE — added batch boundary handling
+2026-03-28T21:23:00   milestone   Item #101: EXECUTE COMPLETE — committed in abc1234
+2026-03-28T21:25:00   milestone   Item #101: TEST COMPLETE — single-gpu, ddp, fsdp pass
+2026-03-28T21:25:01   milestone   Item #101: ALL PHASES COMPLETE
+2026-03-28T21:26:00   decision    Item #102: plan is to add retry logic to API client...
+2026-03-28T21:26:30   milestone   Item #102: PLAN COMPLETE — exponential backoff in api_client.py
+2026-03-28T21:27:00   milestone   Item #102: REVIEW COMPLETE — no revisions needed
+2026-03-28T21:28:00   milestone   Item #102: EXECUTE COMPLETE — committed in def5678
+2026-03-28T21:29:00   dead-end    Item #102: TEST FAILED — DDP test hangs on barrier sync
+2026-03-28T21:30:00   milestone   Item #102: TEST COMPLETE — fixed barrier, all pass
+2026-03-28T21:30:01   milestone   Item #102: ALL PHASES COMPLETE
+2026-03-28T21:31:00   decision    Item #103: plan is to update schema migration...
+2026-03-28T21:31:30   milestone   Item #103: PLAN COMPLETE — add nullable column, backfill
 ```
 
 An agent reading this state at the next iteration would:
 1. See 2 "ALL PHASES COMPLETE" entries → 2 items done
-2. See `Issue #103: PLAN COMPLETE` as the most recent milestone → current item is #103, next phase is REVIEW
-3. Proceed with adversarial review of issue #103's plan
+2. See `Item #103: PLAN COMPLETE` as the most recent milestone → current item is #103, next phase is REVIEW
+3. Proceed with adversarial review of item #103's plan
 
 ## Generalizing to Deeper Nesting
 
