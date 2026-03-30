@@ -164,11 +164,13 @@ D. TEST — <description>
      --tags "<cursor-tags>" \
      "<summary of what happened>"
    ```
+   (`--tags` requires a `tags` field in the store schema — check `lab-notebook schema`.)
 
 5. CHECK — Signal the outcome:
    - Work succeeded → include "PHASE COMPLETE"
    - Work failed → include "PHASE FAILED"
    - All items complete → output <promise>DONE</promise>
+   - Work still in progress → include neither signal; same position reruns
 ```
 
 ## Worked Example: 9 GitHub Issues
@@ -182,7 +184,7 @@ plan -> adversarial review -> execute -> smoke test.
 
 ```bash
 /lisa-wiggum:lisa-loop --prompt-file /tmp/lisa-loop-fix-9-issues.md \
-  --store /lustre/orion/lrn091/proj-shared/cwang31/lab-notebook \
+  --store /data/lab-notebook \
   --context my-repo/fix-9-issues \
   --dim item 101 102 103 104 105 106 107 108 109 \
   --dim phase plan review execute test \
@@ -195,7 +197,7 @@ plan -> adversarial review -> execute -> smoke test.
 
 ```
 ## State Store
-Notebook: /lustre/orion/lrn091/proj-shared/cwang31/lab-notebook
+Notebook: /data/lab-notebook
 Context: my-repo/fix-9-issues
 Available entry types: observation, decision, dead-end, question, milestone
 
@@ -225,7 +227,7 @@ last phase succeeds. Output <promise>DONE</promise> when complete.
    (e.g., "Cursor: item=103, phase=review, retry=0").
    Query the notebook for context on the current item:
    ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
+   LAB_NOTEBOOK_DIR="/data/lab-notebook" \
      lab-notebook sql \
      "SELECT ts, type, tags, substr(content,1,200) FROM entries
       WHERE context='my-repo/fix-9-issues'
@@ -242,7 +244,7 @@ last phase succeeds. Output <promise>DONE</promise> when complete.
 
 4. LOG — Record the outcome using the emit template from the system message:
    ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
+   LAB_NOTEBOOK_DIR="/data/lab-notebook" \
      lab-notebook emit --context my-repo/fix-9-issues --type milestone \
      --tags "<cursor-tags-from-system-message>" \
      "<summary of what happened>"
