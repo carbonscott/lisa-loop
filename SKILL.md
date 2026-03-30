@@ -70,7 +70,7 @@ Then ask:
 
 > How many retries per phase if it fails? (0 = no retries; default 2)
 
-If retries > 0 (e.g., 2): add `--dim retry 0 1 2 --on-exhaust skip` to the Step 6 invocation (values are `0 1 ... N` for N retries). If retries = 0: omit the retry dimension; in this case PHASE FAILED advances the phase (same effect as PHASE COMPLETE — e.g., with only `--dim phase plan review execute`, both signals advance to the next phase).
+If retries > 0 (e.g., 2): add `--dim retry 0 1 2 --on-exhaust skip` as the final (innermost) `--dim` flag in the Step 6 invocation — after `--dim phase` (values are `0 1 ... N` for N retries). If retries = 0: omit the retry dimension; in this case PHASE FAILED advances the phase (same effect as PHASE COMPLETE — e.g., with only `--dim phase plan review execute`, both signals advance to the next phase).
 
 ### Step 3b — Categories
 

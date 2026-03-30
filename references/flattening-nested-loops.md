@@ -50,7 +50,7 @@ This creates a 3D cursor: `(item, phase, retry)`.
 |--------|--------|
 | `PHASE COMPLETE` | Advances second-to-innermost dimension (e.g., `phase` when `retry` is innermost), resets all inner dimensions |
 | `PHASE FAILED` | Advances innermost dimension (retry) |
-| Neither | Cursor unchanged; same position reruns next iteration |
+| Neither | Cursor unchanged; same position reruns next iteration (`none` in traversal history) |
 | Retry exhausted | Resets innermost, advances second-to-innermost (hardcoded skip behavior) |
 | All dimensions exhausted | Loop ends (cursor complete) |
 | `<promise>DONE</promise>` | Loop ends immediately |
