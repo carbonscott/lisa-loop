@@ -48,10 +48,10 @@ This creates a 3D cursor: `(item, phase, retry)`.
 
 | Signal | Effect |
 |--------|--------|
-| `PHASE COMPLETE` | Advances outer dimension (e.g., next phase), resets inner dimensions |
+| `PHASE COMPLETE` | Advances second-to-innermost dimension (e.g., `phase` when `retry` is innermost), resets all inner dimensions |
 | `PHASE FAILED` | Advances innermost dimension (retry) |
 | Neither | Cursor unchanged, iteration advances |
-| Retry exhausted | `--on-exhaust skip` skips to next outer value |
+| Retry exhausted | Advances second-to-innermost (skip is the hardcoded behavior; `--on-exhaust skip` is stored in the state file but currently not read by the hook — reserved for future extension) |
 | All dimensions exhausted | Loop ends (cursor complete) |
 | `<promise>DONE</promise>` | Loop ends immediately |
 
@@ -268,7 +268,6 @@ Lisa iteration 7 | Cursor: item=102, phase=review, retry=0
 4: item=101,phase=test,retry=0 -> success
 5: item=102,phase=plan,retry=0 -> success
 6: item=102,phase=review,retry=0 -> none
-...
 ```
 
 The agent reads this, sees it needs to do adversarial review for issue #102,
@@ -286,4 +285,7 @@ Add more `--dim` flags. For example, a 4-level cursor:
 ```
 
 Each additional dimension is just another `--dim` flag. The stop hook
-handles all the transition logic mechanically.
+handles all the transition logic mechanically. `PHASE COMPLETE` always
+advances the second-to-innermost dimension — here `phase`, not `dataset`
+or `model`. `PHASE FAILED` advances `retry` (innermost). When `retry` is
+exhausted, the hook overflows to `phase` (second-to-innermost).

@@ -66,6 +66,12 @@ If provided, the user lists ordered stages (e.g., "Launch → Monitor → Eval �
 
 These phases also become a `--dim phase <phase1> <phase2> ...` flag on the lisa-wiggum invocation (step 6), so cursor advancement through phases is mechanical. The `## Phases` section in the prompt is for the agent's reference, not for cursor reconstruction.
 
+Then ask:
+
+> How many retries per phase if it fails? (0 = no retries; default 2)
+
+If retries > 0 (e.g., 2): add `--dim retry 0 1 2 --on-exhaust skip` to the Step 6 invocation (values are `0 1 ... N` for N retries). If retries = 0: omit the retry dimension; in this case PHASE FAILED advances the phase (same effect as PHASE COMPLETE).
+
 ### Step 3b — Categories
 
 > Should iterations be classified? Name the categories, or skip.
@@ -112,12 +118,15 @@ Build the prompt using the template below, filling in all placeholders from step
 
 **After the user confirms:**
 
+*Requires the `lisa-wiggum` plugin. If `/lisa-wiggum:lisa-loop` is unavailable, stop and tell the user to install the plugin first.*
+
 1. Write the assembled prompt to `/tmp/lisa-loop-<context-slug>.md` using the Write tool.
 2. Immediately invoke `/lisa-wiggum:lisa-loop` (fully-qualified — do NOT use bare `/lisa-loop`, which would recurse into this skill) with these flags:
    - `--prompt-file /tmp/lisa-loop-<context-slug>.md`
    - `--store <path>` (from step 1)
    - `--context <context-slug>` (from step 4)
    - `--dim phase <phase1> <phase2> ...` (only if phases were configured in step 3a)
+   - `--dim retry 0 1 ... N --on-exhaust skip` (only if retries > 0 from step 3a; values are `0 1 ... N`)
    - `--max-iterations N` (from step 5)
    - `--completion-promise "DONE"`
 
@@ -200,6 +209,9 @@ count 0→30s, 1→30s, 2→60s, 3→60s, 4→120s, 5→240s, 6→480s, 7→960s
      [--<schema-field> value ...] [--extra key=value ...] \
      "concise summary of what happened this iteration"
    ```
+   Note: `--tags` is only valid if the schema includes a `tags` field
+   (check the Step 1 schema probe). The system message emit template
+   already omits `--tags` when no cursor tags are set.
    Use schema-defined fields as top-level flags (e.g., `--status keep
    --change_type progress`). Use `--extra` only for undeclared fields.
    If the logging command fails, note the error and continue —
@@ -217,6 +229,16 @@ count 0→30s, 1→30s, 2→60s, 3→60s, 4→120s, 5→240s, 6→480s, 7→960s
      the retry dimension (or skips on exhaust).
    - If the overall stop condition is met (all work genuinely done):
      output <promise>DONE</promise> to exit the loop entirely.
+   - If none of the above apply (work still in progress):
+     include neither signal — the cursor stays unchanged and the
+     same position runs again next iteration.
+   Signal detection note: these strings are matched as literal text
+   anywhere in the response (case-sensitive, grep -F). Do NOT include
+   "PHASE COMPLETE" or "PHASE FAILED" in code blocks, quoted examples,
+   or prose references — they will trigger the hook regardless.
+   *(if no --dim flags)* Without cursor dimensions, signals are still
+   detected but have no cursor to advance — the loop increments the
+   iteration counter only. Useful for simple monitoring loops.
    *(if pacing)* Compute sleep duration: walk the backoff sequence by
    the consecutive low-activity count from RECALL. If past the end of
    the explicit sequence, double the last value (capped). Execute:
