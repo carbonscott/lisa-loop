@@ -50,10 +50,12 @@ This creates a 3D cursor: `(item, phase, retry)`.
 |--------|--------|
 | `PHASE COMPLETE` | Advances second-to-innermost dimension (e.g., `phase` when `retry` is innermost), resets all inner dimensions |
 | `PHASE FAILED` | Advances innermost dimension (retry) |
-| Neither | Cursor unchanged, iteration advances |
-| Retry exhausted | Advances second-to-innermost (skip is the hardcoded behavior; `--on-exhaust skip` is stored in the state file but currently not read by the hook — reserved for future extension) |
+| Neither | Cursor unchanged; same position reruns next iteration |
+| Retry exhausted | Resets innermost, advances second-to-innermost (hardcoded skip behavior) |
 | All dimensions exhausted | Loop ends (cursor complete) |
 | `<promise>DONE</promise>` | Loop ends immediately |
+
+*Note: `--on-exhaust skip` is stored in the state file but currently not read by the hook — the skip behavior is hardcoded. The flag is reserved for future extension.*
 
 ### Examples
 

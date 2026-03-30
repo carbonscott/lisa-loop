@@ -211,7 +211,8 @@ count 0→30s, 1→30s, 2→60s, 3→60s, 4→120s, 5→240s, 6→480s, 7→960s
    ```
    Note: `--tags` is only valid if the schema includes a `tags` field
    (check the Step 1 schema probe). The system message emit template
-   already omits `--tags` when no cursor tags are set.
+   already omits `--tags` when no cursor tags are set (including when
+   no `--dim` flags are configured).
    Use schema-defined fields as top-level flags (e.g., `--status keep
    --change_type progress`). Use `--extra` only for undeclared fields.
    If the logging command fails, note the error and continue —
@@ -274,6 +275,7 @@ To build a lisa-loop prompt manually instead of using interactive setup:
    /lisa-wiggum:lisa-loop --prompt-file <path-to-prompt.md> \
      --store <notebook-path> --context <context-slug> \
      --dim phase plan execute test \
+     --dim retry 0 1 2 --on-exhaust skip \
      --max-iterations 10 --completion-promise "DONE"
    ```
 
