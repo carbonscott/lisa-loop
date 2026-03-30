@@ -55,7 +55,7 @@ This creates a 3D cursor: `(item, phase, retry)`.
 | All dimensions exhausted | Loop ends (cursor complete) |
 | `<promise>DONE</promise>` | Loop ends immediately |
 
-*Note: `--on-exhaust skip` is stored in the state file but currently not read by the hook — the skip behavior is hardcoded. The flag is reserved for future extension.*
+*Note: `--on-exhaust skip` is stored in the state file but the hook does not read it — skip (reset innermost, advance second-to-innermost) is the only implemented on-exhaust behavior. The flag is reserved for future alternatives.*
 
 ### Examples
 
