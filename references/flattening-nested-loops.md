@@ -1,30 +1,75 @@
-# Flattening Nested Loops in Lisa-Loop
+# Multi-Dimensional Cursors in Lisa-Loop
 
 ## When to Use
 
 You have multiple items (issues, experiments, datasets, etc.) and each item
 requires a multi-phase workflow. Your instinct is nested loops — an outer
-loop over items and an inner loop over phases. Ralph-loop only supports one
-active loop (single state file), so you flatten the nesting into one loop
-with a multi-dimensional cursor tracked in lab-notebook.
+loop over items and an inner loop over phases. Lisa-wiggum supports this
+natively with `--dim` flags that define the cursor dimensions. The hook
+flattens the nesting into one loop with mechanical cursor advancement.
 
 ## Pattern
 
 ```
-nested (impossible):              flattened (works):
+nested (conceptual):              lisa-wiggum (actual):
 
-for item in 1..N:                 single lisa-loop:
-  for phase in A..D:                read (item, phase) from notebook
-    do work                         do work for (item, phase)
-    if phase fails: retry           advance cursor:
-                                      phase failed       → same item, same phase
-                                      phase succeeded     → same item, next phase
-                                      last phase passed   → next item, first phase
-                                      last item completed → LOOP_COMPLETE
+for item in 1..N:                 single loop with --dim flags:
+  for phase in A..D:                cursor position in system message
+    do work                         do work for current position
+    if phase fails: retry           PHASE COMPLETE → advance outer dim
+                                    PHASE FAILED   → advance retry dim
+                                    cursor exhausted → loop ends
 ```
 
-Lab-notebook replaces both loop variables. Each iteration is stateless —
-it reconstructs its position entirely from notebook queries.
+The cursor position is injected into the system message by the stop hook.
+Each iteration reads its position from the header (e.g.,
+`Cursor: item=3, phase=execute, retry=0`), does one unit of work, and
+signals the outcome. The hook advances the cursor mechanically.
+
+## How `--dim` Flags Work
+
+Each `--dim` flag defines one dimension of the cursor. Order matters —
+dimensions are listed outer-to-inner. The innermost dimension is the
+retry/failure axis.
+
+```bash
+/lisa-wiggum:lisa-loop --prompt-file task.md \
+  --store /path/to/notebook --context my-repo/fix-issues \
+  --dim item 101 102 103 \
+  --dim phase plan review execute test \
+  --dim retry 0 1 2 \
+  --on-exhaust skip \
+  --max-iterations 50 --completion-promise "DONE"
+```
+
+This creates a 3D cursor: `(item, phase, retry)`.
+
+### Signal-driven advancement
+
+| Signal | Effect |
+|--------|--------|
+| `PHASE COMPLETE` | Advances second-to-innermost dimension (e.g., `phase` when `retry` is innermost), resets all inner dimensions |
+| `PHASE FAILED` | Advances innermost dimension (retry) |
+| Neither | Cursor unchanged; same position reruns next iteration (`none` in traversal history) |
+| Retry exhausted | Resets innermost, advances second-to-innermost (hardcoded skip behavior) |
+| All dimensions exhausted | Loop ends (cursor complete) |
+| `<promise>DONE</promise>` | Loop ends immediately |
+
+*Note: `--on-exhaust skip` is stored in the state file but the hook does not read it — skip (reset innermost, advance second-to-innermost) is the only implemented on-exhaust behavior. The flag is reserved for future alternatives.*
+
+### Examples
+
+Success at `(item=101, phase=plan, retry=0)`:
+  -> advances to `(item=101, phase=review, retry=0)`
+
+Failure at `(item=101, phase=execute, retry=0)`:
+  -> advances to `(item=101, phase=execute, retry=1)`
+
+Failure at `(item=101, phase=execute, retry=2)` (retry exhausted, on_exhaust=skip):
+  -> advances to `(item=101, phase=test, retry=0)`
+
+Success at `(item=101, phase=test, retry=0)` (last phase):
+  -> advances to `(item=102, phase=plan, retry=0)`
 
 ## Notebook Conventions
 
@@ -38,144 +83,94 @@ training/sweep-architectures
 
 All entries from the loop share this context.
 
-### Entry types for cursor tracking
+### Entry types
 
-Use these entry types to track progress:
+These entry types are useful for tracking work, but they are not required
+for cursor advancement (the cursor is mechanical):
 
 | Entry type   | When to emit | Purpose |
 |-------------|--------------|---------|
-| `milestone` | A phase completes successfully for an item | Marks phase completion — this is what the cursor reads |
-| `decision`  | A plan is formed, a review is done, a choice is made | Records reasoning for the current phase |
-| `dead-end`  | A phase attempt fails | Records what went wrong, prevents repeating the same failure |
-| `observation` | Intermediate findings during a phase | Context for later phases |
+| `milestone` | A unit of work completes successfully | Records what was accomplished |
+| `decision`  | A plan is formed, a review is done, a choice is made | Records reasoning |
+| `dead-end`  | A work attempt fails | Records what went wrong |
+| `observation` | Intermediate findings | Context for later iterations |
 
-### Content format for milestones (critical)
+### Tagging entries with cursor position
 
-Milestone entries MUST follow this exact format so queries can parse them:
-
-```
-Item #<N>: <PHASE_NAME> COMPLETE — <one-line summary>
-```
-
-Examples:
-```
-Item #3: PLAN COMPLETE — will refactor DataLoader to support streaming
-Item #3: REVIEW COMPLETE — revised plan to handle edge case in batch collation
-Item #3: EXECUTE COMPLETE — committed refactor in 2 files, 47 lines changed
-Item #3: TEST COMPLETE — single-gpu, ddp, fsdp all pass
-```
-
-When all phases for an item pass, emit one final milestone:
-```
-Item #3: ALL PHASES COMPLETE
-```
-
-## Query Recipes
-
-Replace `<STORE>` with the absolute notebook path and `<CTX>` with the context.
-
-### Count completed items
+The system message provides an `emit` command template with `--tags`
+pre-filled from the current cursor position. Use it so entries are
+queryable by position:
 
 ```bash
-LAB_NOTEBOOK_DIR="<STORE>" lab-notebook sql \
-  "SELECT COUNT(DISTINCT substr(content, 7, instr(substr(content,7),':')-1))
-   FROM entries
-   WHERE context='<CTX>' AND type='milestone'
-     AND content LIKE '%ALL PHASES COMPLETE%'"
+LAB_NOTEBOOK_DIR="/path/to/notebook" lab-notebook emit \
+  --context my-repo/fix-issues --type milestone \
+  --tags "item=101,phase=plan" \
+  "Planned approach: refactor DataLoader for streaming"
 ```
 
-### Find current item and last completed phase
-
+Query entries for a specific position:
 ```bash
-LAB_NOTEBOOK_DIR="<STORE>" lab-notebook sql \
-  "SELECT ts, substr(content,1,120) FROM entries
-   WHERE context='<CTX>' AND type='milestone'
-   ORDER BY ts DESC LIMIT 5"
+LAB_NOTEBOOK_DIR="/path/to/notebook" lab-notebook sql \
+  "SELECT ts, type, tags, substr(content,1,200) FROM entries
+   WHERE context='my-repo/fix-issues' AND tags LIKE '%item=101%'
+   ORDER BY ts DESC LIMIT 10"
 ```
 
-Read the results top-down:
-- If the most recent milestone is `Item #N: ALL PHASES COMPLETE` and N is the last item, all work is done — skip to CHECK and emit DONE.
-- If the most recent milestone is `Item #N: ALL PHASES COMPLETE` and N is not the last item, the current item is N+1, starting at the first phase.
-- If the most recent milestone is `Item #N: <PHASE> COMPLETE`, the current item is N, and the next phase follows `<PHASE>`.
-- If there are no milestones, this is iteration 1 — start at item 1, phase 1.
+## Prompt Template for Multi-Dimensional Work
 
-### Check for dead-ends on current item and phase
-
-```bash
-LAB_NOTEBOOK_DIR="<STORE>" lab-notebook search "Item #<N>: <PHASE> FAILED" --context <CTX> --type dead-end
-```
-
-## Transition Logic Template
-
-Drop this into the `## Each Iteration` section of a lisa-loop prompt.
-Replace placeholders with your specific items and phases.
+The prompt for a multi-dimensional loop is simpler than the old
+flattening approach because the cursor handles all transition logic.
 
 ```
-## Items
-<ITEMS — numbered list, e.g.:>
-1. GitHub issue #101 — fix data loader race condition
-2. GitHub issue #102 — add retry logic to API client
-3. GitHub issue #103 — update schema migration
+## State Store
+Notebook: <absolute-path>
+Context: <context-slug>
+Available entry types: <from lab-notebook schema>
+
+## Goal
+<task description — what items, what phases, what success looks like>
 
 ## Phases (per item)
-<PHASES — ordered list, e.g.:>
-A. PLAN — read the issue, understand the code, write an implementation plan
-B. REVIEW — adversarially critique the plan, revise if needed
-C. EXECUTE — implement the revised plan, commit
-D. TEST — run smoke tests, fix failures until all pass
+A. PLAN — <description>
+B. REVIEW — <description>
+C. EXECUTE — <description>
+D. TEST — <description>
+
+## Stop Condition
+<natural language — when this is true, output <promise>DONE</promise>>
 
 ## Each Iteration
 
-1. RECALL — Query the notebook to find where you are:
+1. RECALL — Read your current cursor position from the system message
+   header (e.g., "Cursor: item=101, phase=plan, retry=0").
+   Query the notebook for context on the current item and phase:
    ```
-   LAB_NOTEBOOK_DIR="<STORE>" lab-notebook sql \
-     "SELECT ts, substr(content,1,120) FROM entries
-      WHERE context='<CTX>' AND type='milestone'
+   LAB_NOTEBOOK_DIR="<path>" lab-notebook sql \
+     "SELECT ts, type, tags, substr(content,1,200) FROM entries
+      WHERE context='<ctx>' AND tags LIKE '%item=<current>%'
       ORDER BY ts DESC LIMIT 10"
    ```
-   Parse the most recent milestones to determine:
-   - current_item: which item number you are working on
-   - current_phase: which phase to execute next
-   - If no milestones exist → current_item=1, current_phase=A
-   - If the most recent milestone is "Item #N: ALL PHASES COMPLETE" and N
-     is the last item → all work is done, skip to CHECK and emit DONE
 
-   Also check for dead-ends on the current item and phase:
+2. ASSESS — Based on cursor position and notebook entries:
+   what does this phase require? Any prior dead-ends to learn from?
+
+3. EXECUTE — Do the work for the current (item, phase).
+
+4. LOG — Record the outcome using the emit template from the system
+   message (it has --tags pre-filled):
    ```
-   LAB_NOTEBOOK_DIR="<STORE>" lab-notebook search "Item #<current_item>: <current_phase> FAILED" \
-     --context <CTX> --type dead-end
+   LAB_NOTEBOOK_DIR="<path>" lab-notebook emit \
+     --context <ctx> --type <milestone|decision|dead-end> \
+     --tags "<cursor-tags>" \
+     "<summary of what happened>"
    ```
+   (`--tags` requires a `tags` field in the store schema — check `lab-notebook schema`.)
 
-2. ASSESS — Decide what to do this iteration:
-   - If the dead-end search returned results for the current phase: adjust approach based on what failed
-   - Otherwise: proceed with the phase's defined work
-
-3. EXECUTE — Do the work for (current_item, current_phase).
-
-4. LOG — Record the outcome:
-   - On success:
-     ```
-     LAB_NOTEBOOK_DIR="<STORE>" lab-notebook emit \
-       --context <CTX> --type milestone \
-       "Item #<N>: <PHASE> COMPLETE — <summary>"
-     ```
-   - If this was the last phase for this item, also emit:
-     ```
-     LAB_NOTEBOOK_DIR="<STORE>" lab-notebook emit \
-       --context <CTX> --type milestone \
-       "Item #<N>: ALL PHASES COMPLETE"
-     ```
-   - On failure:
-     ```
-     LAB_NOTEBOOK_DIR="<STORE>" lab-notebook emit \
-       --context <CTX> --type dead-end \
-       "Item #<N>: <PHASE> FAILED — <what went wrong>"
-     ```
-
-5. CHECK — Evaluate stop condition:
-   - Count items with "ALL PHASES COMPLETE" milestones
-   - If count == total items → output <promise>DONE</promise>
-   - Otherwise → summarize: "Completed <X>/<TOTAL>. Next: Item #<N>, phase <P>."
+5. CHECK — Signal the outcome:
+   - Work succeeded → include "PHASE COMPLETE"
+   - Work failed → include "PHASE FAILED"
+   - All items complete → output <promise>DONE</promise>
+   - Work still in progress → include neither signal; same position reruns
 ```
 
 ## Worked Example: 9 GitHub Issues
@@ -183,13 +178,26 @@ D. TEST — run smoke tests, fix failures until all pass
 ### Scenario
 
 Solve GitHub issues #101 through #109. Each issue goes through:
-plan → adversarial review → execute → smoke test (single GPU, DDP, FSDP).
+plan -> adversarial review -> execute -> smoke test.
 
-### Complete prompt (ready for ralph-loop)
+### Invocation
+
+```bash
+/lisa-wiggum:lisa-loop --prompt-file /tmp/lisa-loop-fix-9-issues.md \
+  --store /data/lab-notebook \
+  --context my-repo/fix-9-issues \
+  --dim item 101 102 103 104 105 106 107 108 109 \
+  --dim phase plan review execute test \
+  --dim retry 0 1 2 \
+  --on-exhaust skip \
+  --max-iterations 50 --completion-promise "DONE"
+```
+
+### Prompt (written to `/tmp/lisa-loop-fix-9-issues.md`)
 
 ```
 ## State Store
-Notebook: /lustre/orion/lrn091/proj-shared/cwang31/lab-notebook
+Notebook: /data/lab-notebook
 Context: my-repo/fix-9-issues
 Available entry types: observation, decision, dead-end, question, milestone
 
@@ -197,24 +205,9 @@ Available entry types: observation, decision, dead-end, question, milestone
 Solve GitHub issues #101 through #109 sequentially, each through a full
 plan-review-execute-test workflow.
 
-## Items
-1. Item #101 (GitHub issue)
-2. Item #102 (GitHub issue)
-3. Item #103 (GitHub issue)
-4. Item #104 (GitHub issue)
-5. Item #105 (GitHub issue)
-6. Item #106 (GitHub issue)
-7. Item #107 (GitHub issue)
-8. Item #108 (GitHub issue)
-9. Item #109 (GitHub issue)
-
-Each item is a GitHub issue in this repository. Use /gh-skills to fetch
-details during the PLAN phase.
-
 ## Phases (per item)
 A. PLAN — Fetch the issue with /gh-skills. Read all relevant code. Write a
-   complete, self-contained implementation plan. Do NOT enter plan mode
-   (operator is hands-off). Log plan as a decision entry.
+   complete, self-contained implementation plan. Log plan as a decision entry.
 B. REVIEW — Adopt an adversarial reviewer mindset. Critique the plan for:
    weaknesses, missed edge cases, interactions with other code, test gaps.
    For each critique, either defend with evidence or acknowledge and revise.
@@ -225,115 +218,78 @@ D. TEST — Run smoke tests: single GPU, DDP, FSDP. If any fail, diagnose
    and fix. Repeat until all three pass.
 
 ## Stop Condition
-All 9 issues have "ALL PHASES COMPLETE" milestone entries → <promise>DONE</promise>
+All 9 issues solved — the cursor will exhaust naturally when the last item's
+last phase succeeds. Output <promise>DONE</promise> when complete.
 
 ## Each Iteration
 
-1. RECALL — Query the notebook:
+1. RECALL — Read cursor position from the system message header
+   (e.g., "Cursor: item=103, phase=review, retry=0").
+   Query the notebook for context on the current item:
    ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
+   LAB_NOTEBOOK_DIR="/data/lab-notebook" \
      lab-notebook sql \
-     "SELECT ts, substr(content,1,120) FROM entries
-      WHERE context='my-repo/fix-9-issues' AND type='milestone'
-      ORDER BY ts DESC LIMIT 15"
-   ```
-   Determine current_item and current_phase from the most recent milestones.
-   If no milestones → start at Item #101, phase PLAN.
-   If the most recent milestone is "Item #109: ALL PHASES COMPLETE",
-   all work is done — skip to CHECK and emit DONE.
-
-   Check for dead-ends on current item and phase:
-   ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
-     lab-notebook search "Item #<current>: <current_phase> FAILED" \
-     --context my-repo/fix-9-issues --type dead-end
+     "SELECT ts, type, tags, substr(content,1,200) FROM entries
+      WHERE context='my-repo/fix-9-issues'
+        AND tags LIKE '%item=<current_item>%'
+      ORDER BY ts DESC LIMIT 10"
    ```
 
-2. ASSESS — Based on recalled state:
+2. ASSESS — Based on cursor position and recalled entries:
    - Which issue am I on? Which phase?
    - Any prior dead-ends to learn from?
    - What does this phase require?
 
 3. EXECUTE — Do the work for the current phase of the current issue.
 
-4. LOG — Record the outcome:
-   On phase success:
+4. LOG — Record the outcome using the emit template from the system message:
    ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
+   LAB_NOTEBOOK_DIR="/data/lab-notebook" \
      lab-notebook emit --context my-repo/fix-9-issues --type milestone \
-     "Item #<N>: <PHASE> COMPLETE — <summary>"
+     --tags "<cursor-tags-from-system-message>" \
+     "<summary of what happened>"
    ```
-   When all 4 phases pass for an issue:
-   ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
-     lab-notebook emit --context my-repo/fix-9-issues --type milestone \
-     "Item #<N>: ALL PHASES COMPLETE"
-   ```
-   On failure:
-   ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
-     lab-notebook emit --context my-repo/fix-9-issues --type dead-end \
-     "Item #<N>: <PHASE> FAILED — <what went wrong>"
-   ```
+   On failure, use `--type dead-end` instead.
 
-5. CHECK — Count completed issues:
-   ```
-   LAB_NOTEBOOK_DIR="/lustre/orion/lrn091/proj-shared/cwang31/lab-notebook" \
-     lab-notebook sql \
-     "SELECT COUNT(DISTINCT substr(content, 7, instr(substr(content,7),':')-1))
-      FROM entries
-      WHERE context='my-repo/fix-9-issues' AND type='milestone'
-        AND content LIKE '%ALL PHASES COMPLETE%'"
-   ```
-   If count == 9 → <promise>DONE</promise>
-   Otherwise → "Completed <X>/9. Next: Issue #<N>, phase <P>."
+5. CHECK — Signal the outcome:
+   - Phase work succeeded → include "PHASE COMPLETE"
+   - Phase work failed → include "PHASE FAILED"
+   - All 9 issues complete → output <promise>DONE</promise>
 ```
 
-### Example notebook state mid-run (after completing 2 issues, mid-way through 3rd)
+### Example system message mid-run
+
+After completing issue #101 and starting #102's review phase, the system
+message header would show:
 
 ```
-ts                    type        content
-2026-03-28T21:20:00   decision    Item #101: plan is to refactor the DataLoader...
-2026-03-28T21:20:30   milestone   Item #101: PLAN COMPLETE — refactor DataLoader for streaming
-2026-03-28T21:21:00   decision    Item #101: review found edge case in batch collation, revised
-2026-03-28T21:21:30   milestone   Item #101: REVIEW COMPLETE — added batch boundary handling
-2026-03-28T21:23:00   milestone   Item #101: EXECUTE COMPLETE — committed in abc1234
-2026-03-28T21:25:00   milestone   Item #101: TEST COMPLETE — single-gpu, ddp, fsdp pass
-2026-03-28T21:25:01   milestone   Item #101: ALL PHASES COMPLETE
-2026-03-28T21:26:00   decision    Item #102: plan is to add retry logic to API client...
-2026-03-28T21:26:30   milestone   Item #102: PLAN COMPLETE — exponential backoff in api_client.py
-2026-03-28T21:27:00   milestone   Item #102: REVIEW COMPLETE — no revisions needed
-2026-03-28T21:28:00   milestone   Item #102: EXECUTE COMPLETE — committed in def5678
-2026-03-28T21:29:00   dead-end    Item #102: TEST FAILED — DDP test hangs on barrier sync
-2026-03-28T21:30:00   milestone   Item #102: TEST COMPLETE — fixed barrier, all pass
-2026-03-28T21:30:01   milestone   Item #102: ALL PHASES COMPLETE
-2026-03-28T21:31:00   decision    Item #103: plan is to update schema migration...
-2026-03-28T21:31:30   milestone   Item #103: PLAN COMPLETE — add nullable column, backfill
+Lisa iteration 7 | Cursor: item=102, phase=review, retry=0
+
+## Traversal
+1: item=101,phase=plan,retry=0 -> success
+2: item=101,phase=review,retry=0 -> success
+3: item=101,phase=execute,retry=0 -> success
+4: item=101,phase=test,retry=0 -> success
+5: item=102,phase=plan,retry=0 -> success
+6: item=102,phase=review,retry=0 -> none
 ```
 
-An agent reading this state at the next iteration would:
-1. See 2 "ALL PHASES COMPLETE" entries → 2 items done
-2. See `Item #103: PLAN COMPLETE` as the most recent milestone → current item is #103, next phase is REVIEW
-3. Proceed with adversarial review of item #103's plan
+The agent reads this, sees it needs to do adversarial review for issue #102,
+queries the notebook for #102's plan entries, and proceeds.
 
 ## Generalizing to Deeper Nesting
 
-The same pattern extends to any depth. For 3 levels (item, phase, attempt):
+Add more `--dim` flags. For example, a 4-level cursor:
 
-```
-Cursor: (item=N, phase=P, attempt=A)
-
-Transitions:
-  attempt failed, retries left     → (N, P, A+1)
-  attempt succeeded                → (N, next_phase, 1)
-  last phase succeeded             → (N+1, first_phase, 1)
-  last item, last phase succeeded  → LOOP_COMPLETE
+```bash
+--dim dataset mnist cifar imagenet \
+--dim model resnet vgg transformer \
+--dim phase train eval \
+--dim retry 0 1
 ```
 
-Each level needs its own **completion signal** in the notebook. The query
-reconstructs all dimensions of the cursor from the most recent entries.
-The prompt's transition logic is the only thing that changes — the
-notebook conventions and query patterns stay the same.
-
-Define a maximum attempt count in the prompt. When retries are exhausted,
-emit a dead-end for the item and advance to the next item.
+Each additional dimension is just another `--dim` flag. The stop hook
+handles all the transition logic mechanically. `PHASE COMPLETE` always
+advances the second-to-innermost dimension — here `phase`, not `dataset`
+or `model`. `PHASE FAILED` advances `retry` (innermost). When `retry` is
+exhausted, the hook overflows to `phase` (second-to-innermost).
