@@ -1,18 +1,18 @@
 ---
-name: lisa-loop
+name: recall-loop
 description: >-
   Prompt generator for lisa-wiggum that adds lab-notebook as
   cross-iteration state. Each iteration can recall prior results,
   do work, and log progress. Use when you need a stateful iterative
-  loop with structured memory. Trigger on: stateful loop, lisa-loop,
+  loop with structured memory. Trigger on: stateful loop, recall-loop,
   iterative task with memory.
 user-invocable: true
 argument-hint: --store <path-to-lab-notebook> <task description>
 ---
 
-# /lisa-loop — Stateful Loop
+# /recall-loop — Stateful Loop
 
-Lisa-loop is a prompt generator for lisa-wiggum. It builds a structured
+Recall-loop is a prompt generator for lisa-wiggum. It builds a structured
 prompt that gives each iteration access to a `lab-notebook` store —
 adding queryable, persistent state on top of lisa-wiggum's cursor-driven
 loop. The prompt is static, but the notebook data changes each iteration,
@@ -121,7 +121,7 @@ Build the prompt using the template below, filling in all placeholders from step
 *Requires the `lisa-wiggum` plugin. If `/lisa-wiggum:lisa-loop` is unavailable, stop and tell the user to install the plugin first.*
 
 1. Write the assembled prompt to `/tmp/lisa-loop-<context-slug>.md` using the Write tool.
-2. Immediately invoke `/lisa-wiggum:lisa-loop` (fully-qualified — do NOT use bare `/lisa-loop`, which would recurse into this skill) with these flags:
+2. Immediately invoke `/lisa-wiggum:lisa-loop` (fully-qualified — do NOT use bare `/recall-loop`, which would recurse into this skill) with these flags:
    - `--prompt-file /tmp/lisa-loop-<context-slug>.md`
    - `--store <path>` (from step 1)
    - `--context <context-slug>` (from step 4)
