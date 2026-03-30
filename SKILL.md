@@ -1,18 +1,18 @@
 ---
-name: lisa-loop
+name: recall-loop
 description: >-
   Prompt generator for lisa-wiggum that adds lab-notebook as
   cross-iteration state. Each iteration can recall prior results,
   do work, and log progress. Use when you need a stateful iterative
-  loop with structured memory. Trigger on: stateful loop, lisa-loop,
+  loop with structured memory. Trigger on: stateful loop, recall-loop,
   iterative task with memory.
 user-invocable: true
 argument-hint: --store <path-to-lab-notebook> <task description>
 ---
 
-# /lisa-loop — Stateful Loop
+# /recall-loop — Stateful Loop
 
-Lisa-loop is a prompt generator for lisa-wiggum. It builds a structured
+Recall-loop is a prompt generator for lisa-wiggum. It builds a structured
 prompt that gives each iteration access to a `lab-notebook` store —
 adding queryable, persistent state on top of lisa-wiggum's cursor-driven
 loop. The prompt is static, but the notebook data changes each iteration,
@@ -110,7 +110,7 @@ Default to `--max-iterations 10`. Mention it:
 
 Build the prompt using the template below, filling in all placeholders from steps 1-5. Sections marked *(if configured)* are only included when the user provided values in step 3. If skipped, omit them entirely — the prompt should have no optional sections. Present the full assembled prompt to the user for review:
 
-> Here's the assembled lisa-loop prompt:
+> Here's the assembled recall-loop prompt:
 >
 > *(show the filled-in prompt)*
 >
@@ -120,9 +120,9 @@ Build the prompt using the template below, filling in all placeholders from step
 
 *Requires the `lisa-wiggum` plugin. If `/lisa-wiggum:lisa-loop` is unavailable, stop and tell the user to install the plugin first.*
 
-1. Write the assembled prompt to `/tmp/lisa-loop-<context-slug>.md` using the Write tool.
-2. Immediately invoke `/lisa-wiggum:lisa-loop` (fully-qualified — do NOT use bare `/lisa-loop`, which would recurse into this skill) with these flags:
-   - `--prompt-file /tmp/lisa-loop-<context-slug>.md`
+1. Write the assembled prompt to `/tmp/recall-loop-<context-slug>.md` using the Write tool.
+2. Immediately invoke `/lisa-wiggum:lisa-loop` (fully-qualified — do NOT use bare `/recall-loop`, which would recurse into this skill) with these flags:
+   - `--prompt-file /tmp/recall-loop-<context-slug>.md`
    - `--store <path>` (from step 1)
    - `--context <context-slug>` (from step 4)
    - `--dim phase <phase1> <phase2> ...` (only if phases were configured in step 3a)
@@ -250,7 +250,7 @@ count 0→30s, 1→30s, 2→60s, 3→60s, 4→120s, 5→240s, 6→480s, 7→960s
 
 ## Stateful Mechanisms
 
-The generated prompt leverages all available cross-iteration state. The first three are provided by lisa-wiggum; lisa-loop adds notebook entries.
+The generated prompt leverages all available cross-iteration state. The first three are provided by lisa-wiggum; recall-loop adds notebook entries.
 
 | Mechanism | How | Role |
 |-----------|-----|------|
@@ -265,7 +265,7 @@ The generated prompt leverages all available cross-iteration state. The first th
 
 ## Template Reference (Hand-Crafting)
 
-To build a lisa-loop prompt manually instead of using interactive setup:
+To build a recall-loop prompt manually instead of using interactive setup:
 
 1. Pick your state store (any lab-notebook path)
 2. Pick a context name (all entries share this key)
