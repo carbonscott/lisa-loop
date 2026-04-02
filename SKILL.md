@@ -6,7 +6,7 @@ description: >-
   Use when you need a loop with cross-iteration memory. Trigger on:
   stateful loop, recall-loop, iterative task with memory.
 user-invocable: true
-argument-hint: --store <path-to-lab-notebook> <task description>
+argument-hint: [--store <path>] <task description>
 ---
 
 # /recall-loop — Stateful Loop
@@ -27,20 +27,23 @@ Read that file for the full RECALL -> EXECUTE -> LOG cycle details.
 ### Step 1: Parse Arguments
 
 From `$ARGUMENTS`, extract:
-- `--store <path>` — **required**. Path to a lab-notebook store.
+- `--store <path>` — optional. Path to a notebook. Defaults to
+  `$LAB_NOTEBOOK_DIR`.
 - Everything else — the task description.
 
 Edge cases:
-- `--store` missing → ask: "Which lab-notebook store should this loop use?"
+- `--store` missing and `$LAB_NOTEBOOK_DIR` is set → use the default.
+- `--store` missing and `$LAB_NOTEBOOK_DIR` is unset → ask: "Which
+  notebook should this loop use? Set $LAB_NOTEBOOK_DIR or pass --store."
 - `--store` present but no path → ask: "You specified --store but no path."
 - Relative path → resolve to absolute before proceeding.
 
 If the task description is empty or too vague, ask: "What should the loop
 iterate on?"
 
-**Probe the store**:
+**Probe the notebook**:
 ```bash
-LAB_NOTEBOOK_DIR="<path>" lab-notebook schema
+lab-notebook schema
 ```
 - If it **errors** → tell the user to initialize it first.
 - If it **succeeds** → parse the output for entry types and schema fields.
@@ -92,8 +95,7 @@ steps 1-4. Present the assembled prompt for review:
 Fill placeholders from steps 1-4.
 
 ```
-## State Store
-Notebook: <absolute-path>
+## Notebook
 Context: <context-slug>
 Available entry types: <from schema output>
 Available fields: <from schema output>
@@ -109,7 +111,7 @@ When this is true, output <promise>DONE</promise> to exit the loop.
 
 1. RECALL — Query the notebook for prior work:
    ```
-   LAB_NOTEBOOK_DIR="<path>" lab-notebook sql "SELECT ts, type, substr(content,1,200) FROM entries WHERE context='<context>' ORDER BY ts DESC LIMIT 10"
+   lab-notebook sql "SELECT ts, type, substr(content,1,200) FROM entries WHERE context='<context>' ORDER BY ts DESC LIMIT 10"
    ```
    If no entries exist, this is the first iteration — start fresh.
 
@@ -117,7 +119,7 @@ When this is true, output <promise>DONE</promise> to exit the loop.
 
 3. LOG — Record what happened:
    ```
-   LAB_NOTEBOOK_DIR="<path>" lab-notebook emit \
+   lab-notebook emit \
      --context <context> --type <entry-type> \
      [--<schema-field> value ...] [--extra key=value ...] \
      "concise summary of what happened"
